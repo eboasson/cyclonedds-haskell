@@ -1,0 +1,40 @@
+cabal-version:       2.4
+name:                CycloneDDS-Haskell
+version:             0.1.0.0
+synopsis:            Haskell binding for Eclipse Cyclone DDS
+homepage:            https://github.com/githubuser/cars#readme
+license:             EPL-2.0 OR BSD-3-Clause
+license-file:        LICENSE
+author:              Erik Boasson
+maintainer:          eb@ilities.com
+copyright:           (c) 2021 Erik Boasson
+category:            Web
+build-type:          Custom
+
+custom-setup
+  setup-depends:
+    base >= 4.5,
+    Cabal >= 1.24,
+    process >= 1.6
+
+library
+  exposed-modules:     CycloneDDS
+  hs-source-dirs:      dds
+  c-sources:           dds/x.c
+  include-dirs:
+    dds
+    /Users/erik/C/cdds/CC/install/include
+  extra-lib-dirs:
+    /Users/erik/C/cdds/CC/install/lib
+  extra-libraries:     ddsc
+  ghc-options:         -Wall -dynamic
+  build-depends:       base
+  default-language:    Haskell2010
+  default-extensions:  ForeignFunctionInterface
+
+executable pp
+  main-is:             Participant.hs
+  hs-source-dirs:      examples
+  build-depends:       base, CycloneDDS-Haskell
+  ghc-options:         -Wall -dynamic -threaded -rtsopts -with-rtsopts=-N
+  default-language:    Haskell2010
