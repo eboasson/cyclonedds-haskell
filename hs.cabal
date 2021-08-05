@@ -18,14 +18,10 @@ custom-setup
     process >= 1.6
 
 library
-  exposed-modules:     CycloneDDS
+  exposed-modules:     CycloneDDS, TopicDescriptor
   hs-source-dirs:      dds
-  c-sources:           dds/x.c
-  include-dirs:
-    dds
-    /Users/erik/C/cdds/CC/install/include
-  extra-lib-dirs:
-    /Users/erik/C/cdds/CC/install/lib
+  include-dirs:        /Users/erik/C/cdds/CC/install/include
+  extra-lib-dirs:      /Users/erik/C/cdds/CC/install/lib
   extra-libraries:     ddsc
   ghc-options:         -Wall -dynamic
   build-depends:       base
@@ -34,6 +30,11 @@ library
 
 executable pp
   main-is:             Participant.hs
+  other-modules:       OneULong
+  c-sources:           examples/x.c
+  include-dirs:
+    examples
+    /Users/erik/C/cdds/CC/install/include
   hs-source-dirs:      examples
   build-depends:       base, CycloneDDS-Haskell
   ghc-options:         -Wall -dynamic -threaded -rtsopts -with-rtsopts=-N
