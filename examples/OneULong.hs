@@ -23,6 +23,9 @@ instance Storable OneULong where
   peek ptr = OneULong <$> peekByteOff ptr 0
   poke ptr (OneULong a) = pokeByteOff ptr 0 a
 
+instance AllocatingStorable OneULong where
+  freeAllocatedMemory _ = pure ()
+
 instance TopicDescriptor OneULong where
   topicDescriptor _ = c_OneULong_desc
 

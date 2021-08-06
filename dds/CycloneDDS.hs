@@ -145,8 +145,13 @@ newReader rp tp = do
   rd <- c_dds_create_reader (entityHandle rp) (topicHandle tp) nullPtr nullPtr
   return $ Reader { readerHandle = rd, readerParent = getReaderParent rp, readerTopic = tp }
 
-write :: Storable a => Writer a -> a -> IO Int32
-write wr v = alloca $ \ptr -> poke ptr v >> c_dds_write (writerHandle wr) ptr
+-- AllocatingStorable is but a quick hack
+write :: AllocatingStorable a => Writer a -> a -> IO Int32
+write wr v = alloca $ \ptr -> do
+  poke ptr v
+  ret <- c_dds_write (writerHandle wr) ptr
+  freeAllocatedMemory ptr
+  pure ret
 
 takeN :: Storable a => Int -> Reader a -> IO [(SampleInfo, a)]
 takeN maxn rd
