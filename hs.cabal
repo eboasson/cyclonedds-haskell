@@ -30,7 +30,7 @@ library
 
 executable pp
   main-is:             Participant.hs
-  other-modules:       OneULong
+  other-modules:       OneULong, KeyedSeq
   c-sources:           examples/x.c
   include-dirs:
     examples

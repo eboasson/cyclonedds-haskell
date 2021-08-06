@@ -3,3 +3,11 @@ struct OneULong
   unsigned long seq;
 };
 #pragma keylist OneULong
+
+struct KeyedSeq
+{
+  unsigned long seq;
+  unsigned long keyval;
+  sequence<octet> baggage;
+};
+#pragma keylist KeyedSeq keyval

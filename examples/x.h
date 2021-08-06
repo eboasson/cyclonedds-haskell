@@ -28,6 +28,38 @@ extern const dds_topic_descriptor_t OneULong_desc;
 #define OneULong_free(d,o) \
 dds_sample_free ((d), &OneULong_desc, (o))
 
+#ifndef DDS_SEQUENCE_OCTET_DEFINED
+#define DDS_SEQUENCE_OCTET_DEFINED
+typedef struct dds_sequence_octet
+{
+  uint32_t _maximum;
+  uint32_t _length;
+  uint8_t *_buffer;
+  bool _release;
+} dds_sequence_octet;
+
+#define dds_sequence_octet__alloc() \
+((dds_sequence_octet*) dds_alloc (sizeof (dds_sequence_octet)));
+
+#define dds_sequence_octet_allocbuf(l) \
+((uint8_t *) dds_alloc ((l) * sizeof (uint8_t)))
+#endif /* DDS_SEQUENCE_OCTET_DEFINED */
+
+typedef struct KeyedSeq
+{
+  uint32_t seq;
+  uint32_t keyval;
+  dds_sequence_octet baggage;
+} KeyedSeq;
+
+extern const dds_topic_descriptor_t KeyedSeq_desc;
+
+#define KeyedSeq__alloc() \
+((KeyedSeq*) dds_alloc (sizeof (KeyedSeq)));
+
+#define KeyedSeq_free(d,o) \
+dds_sample_free ((d), &KeyedSeq_desc, (o))
+
 #ifdef __cplusplus
 }
 #endif

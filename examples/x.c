@@ -26,3 +26,28 @@ const dds_topic_descriptor_t OneULong_desc =
   OneULong_ops,
   ""
 };
+static const dds_key_descriptor_t KeyedSeq_keys[1] =
+{
+  { "keyval", 2 }
+};
+
+static const uint32_t KeyedSeq_ops [] =
+{
+  DDS_OP_ADR | DDS_OP_TYPE_4BY, offsetof (KeyedSeq, seq),
+  DDS_OP_ADR | DDS_OP_TYPE_4BY | DDS_OP_FLAG_KEY, offsetof (KeyedSeq, keyval),
+  DDS_OP_ADR | DDS_OP_TYPE_SEQ | DDS_OP_SUBTYPE_1BY, offsetof (KeyedSeq, baggage),
+  DDS_OP_RTS
+};
+
+const dds_topic_descriptor_t KeyedSeq_desc =
+{
+  sizeof (KeyedSeq),
+  sizeof (char *),
+  DDS_TOPIC_NO_OPTIMIZE | DDS_TOPIC_FIXED_KEY,
+  1u,
+  "KeyedSeq",
+  KeyedSeq_keys,
+  4,
+  KeyedSeq_ops,
+  ""
+};
