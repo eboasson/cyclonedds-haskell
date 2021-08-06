@@ -2,11 +2,10 @@
 
 module OneULong (OneULong(..)) where
 
-import Foreign.Ptr
 import Foreign.Storable
 import Data.Word
-import Control.Monad
-import TopicDescriptor
+
+import CycloneDDS.TopicDescriptor
 
 -- Make ddsperf's OneULong type available in Haskell relying on IDLC to generate a topic
 -- descriptor.  Writing/reading requires marshalling to/from the C representation of the
@@ -14,12 +13,17 @@ import TopicDescriptor
 --
 -- OneULong is simple enough to do this by hand!
 
-foreign import ccall "&OneULong_desc" c_OneULong_desc :: TopicDescriptorPtr OneULong
-data OneULong = OneULong { oneULongSeq :: Word32 } deriving (Show)
+data OneULong = OneULong
+  { oneULongSeq :: Word32
+  } deriving (Show)
+
 instance Storable OneULong where
   sizeOf _ = sizeOf (undefined :: Word32)
   alignment _ = alignment (undefined :: Word32)
-  peek = liftM OneULong . peek . castPtr
-  poke p = poke (castPtr p) . oneULongSeq
+  peek ptr = OneULong <$> peekByteOff ptr 0
+  poke ptr (OneULong a) = pokeByteOff ptr 0 a
+
 instance TopicDescriptor OneULong where
   topicDescriptor _ = c_OneULong_desc
+
+foreign import ccall "&OneULong_desc" c_OneULong_desc :: TopicDescriptorPtr OneULong

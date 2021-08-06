@@ -18,7 +18,7 @@ custom-setup
     process >= 1.6
 
 library
-  exposed-modules:     CycloneDDS, TopicDescriptor
+  exposed-modules:     CycloneDDS, CycloneDDS.TopicDescriptor, CycloneDDS.BaseTypes, CycloneDDS.SampleInfo
   hs-source-dirs:      dds
   include-dirs:        /Users/erik/C/cdds/CC/install/include
   extra-lib-dirs:      /Users/erik/C/cdds/CC/install/lib

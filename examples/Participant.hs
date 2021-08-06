@@ -9,9 +9,11 @@ main = do
   dp <- newParticipant DefaultDomainId
   tp <- newTopic dp "DDSPerfRDataOU"
   wr <- newWriter dp tp
-  putStrLn "write data"
+  rd <- newReader dp tp
   forM_ [0..] $ \i -> do
-    when (i `mod` 1000_000 == 0) $ putStrLn (show i ++ " ...")
-    write wr $ OneULong i
+    _ <- write wr $ OneULong i
+    when (i `mod` 1000_000 == 0) $ do
+      xs <- takeN 10 rd -- should be at most 1 with default QoS
+      putStrLn (show i ++ " ... " ++ show xs)
   _ <- delete dp
   pure ()

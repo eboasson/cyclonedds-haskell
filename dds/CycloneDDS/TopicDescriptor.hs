@@ -1,4 +1,4 @@
-module TopicDescriptor (
+module CycloneDDS.TopicDescriptor (
   TopicDescriptor,
   topicDescriptor,
   TopicDescriptorPtr(..)) where
