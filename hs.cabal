@@ -18,13 +18,15 @@ custom-setup
     process >= 1.6
 
 library
-  exposed-modules:     CycloneDDS, CycloneDDS.TopicDescriptor, CycloneDDS.BaseTypes, CycloneDDS.SampleInfo
+  exposed-modules:     CycloneDDS, CycloneDDS.TopicDescriptor, CycloneDDS.BaseTypes, CycloneDDS.SampleInfo, CycloneDDS.Serdata, CycloneDDS.Serdata.Raw
   hs-source-dirs:      dds
   include-dirs:        /Users/erik/C/cdds/CC/install/include
   extra-lib-dirs:      /Users/erik/C/cdds/CC/install/lib
   extra-libraries:     ddsc
-  ghc-options:         -Wall -dynamic
-  build-depends:       base
+  -- -optc-Wno-... to suppress some warnings from "foreing import capi"-generated code
+  ghc-options:         -Wall -dynamic -optc-Wno-int-conversion -optc-Wno-incompatible-pointer-types
+  build-depends:       base, c-storable-deriving >= 0.1.3, fixed-vector >= 1.2, unix-bytestring >= 0.3.7.3, bytestring >= 0.10.12, cereal >= 0.5.8.1
+  --build-tools:         c2hs
   default-language:    Haskell2010
   default-extensions:  ForeignFunctionInterface
 
@@ -36,6 +38,6 @@ executable pp
     examples
     /Users/erik/C/cdds/CC/install/include
   hs-source-dirs:      examples
-  build-depends:       base, CycloneDDS-Haskell
+  build-depends:       base, CycloneDDS-Haskell, cereal >= 0.5.8.1
   ghc-options:         -Wall -dynamic -threaded -rtsopts -with-rtsopts=-N
   default-language:    Haskell2010

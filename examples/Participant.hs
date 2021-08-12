@@ -5,6 +5,18 @@ import CycloneDDS
 import OneULong
 import KeyedSeq
 
+tryQQQ :: Participant -> IO ()
+tryQQQ dp = do
+  qqq <- newTopicQQQ dp "QQQ"
+  dp' <- newParticipant DefaultDomainId
+  qqq' <- newTopic dp' "QQQ" :: IO (Topic OneULong)
+  wrqqq <- newWriter dp qqq
+  rdqqq' <- newReader dp' qqq'
+  _ <- write' wrqqq $ OneULong 3_141_592_654
+  xs <- takeN 1 rdqqq'
+  putStrLn (show xs)
+  void $ delete dp'
+
 main :: IO ()
 main = do
   dp <- newParticipant DefaultDomainId
@@ -13,6 +25,7 @@ main = do
   wrOU <- newWriter dp ou
   wrKS <- newWriter dp ks
   rdKS <- newReader dp ks
+  tryQQQ dp
   forM_ [0..] $ \i -> do
     _ <- write wrOU $ OneULong i
     let k = i `mod` 5

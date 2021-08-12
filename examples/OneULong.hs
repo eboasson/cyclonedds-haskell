@@ -1,9 +1,14 @@
 {-# LANGUAGE ForeignFunctionInterface #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DefaultSignatures #-}
 
 module OneULong (OneULong(..)) where
 
 import Foreign.Storable
 import Data.Word
+
+import GHC.Generics (Generic)
+import Data.Serialize
 
 import CycloneDDS.TopicDescriptor
 
@@ -15,7 +20,8 @@ import CycloneDDS.TopicDescriptor
 
 data OneULong = OneULong
   { oneULongSeq :: Word32
-  } deriving (Show)
+  } deriving (Show, Generic)
+instance Serialize OneULong
 
 instance Storable OneULong where
   sizeOf _ = sizeOf (undefined :: Word32)

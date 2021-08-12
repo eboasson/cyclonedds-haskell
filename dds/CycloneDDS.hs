@@ -9,11 +9,13 @@ module CycloneDDS (
   Writer,
   delete,
   write,
+  write',
   takeN,
   newParticipant,
   newPublisher,
   newSubscriber,
   newTopic,
+  newTopicQQQ,
   newWriter,
   newReader,
   InstanceHandle,
@@ -23,6 +25,7 @@ module CycloneDDS (
 import Foreign.C
 import Foreign.Ptr
 import Foreign.Storable
+import Foreign.StablePtr
 import Foreign.Marshal.Alloc
 import Foreign.Marshal.Array
 import Control.Monad (when)
@@ -32,6 +35,9 @@ import Data.Proxy
 import CycloneDDS.TopicDescriptor
 import CycloneDDS.BaseTypes
 import CycloneDDS.SampleInfo
+
+import Data.Serialize
+import CycloneDDS.Serdata
 
 data DomainId = DefaultDomainId | DomainId Word32 deriving (Eq, Ord, Show, Read)
 
@@ -111,6 +117,16 @@ newTopic dp name = do
   tp <- withCString name $ \cname -> c_dds_create_topic dph td cname nullPtr nullPtr
   return $ Topic { topicHandle = tp, topicParent = dp }
 
+newTopicQQQ :: (Serialize a, Show a) => Participant -> String -> IO (Topic a)
+newTopicQQQ dp name = do
+  let dph = entityHandle dp
+  sertypeptr <- newSertype Proxy "OneULong"
+  sertypeptrptr <- malloc
+  poke sertypeptrptr sertypeptr
+  tp <- withCString name $ \cname -> c_dds_create_topic_sertype dph cname sertypeptrptr nullPtr nullPtr nullPtr
+  free sertypeptrptr -- how do I keep the sertype alive? StablePtr? Store it in the topic? That's probably better
+  return $ Topic { topicHandle = tp, topicParent = dp }
+
 newPublisher :: Participant -> IO Publisher
 newPublisher dp = do
   pub <- c_dds_create_publisher (entityHandle dp) nullPtr nullPtr
@@ -153,6 +169,13 @@ write wr v = alloca $ \ptr -> do
   freeAllocatedMemory ptr
   pure ret
 
+write' :: Serialize a => Writer a -> a -> IO Int32
+write' wr v = do
+  stablev <- SamplePtr <$> newStablePtr v
+  ret <- c_dds_write_sampleptr (writerHandle wr) stablev
+  freeStablePtr $ unSamplePtr $ stablev
+  pure ret
+
 takeN :: Storable a => Int -> Reader a -> IO [(SampleInfo, a)]
 takeN maxn rd
   | maxn <= 0 = pure $ []
@@ -172,6 +195,8 @@ foreign import capi "dds/dds.h dds_create_participant"
   c_dds_create_participant :: Word32 -> Ptr () -> Ptr () -> IO (Handle ())
 foreign import capi "dds/dds.h dds_create_topic"
   c_dds_create_topic :: Handle a -> TopicDescriptorPtr b -> CString -> Ptr () -> Ptr () -> IO (Handle b)
+foreign import capi "dds/dds.h dds_create_topic_sertype"
+  c_dds_create_topic_sertype :: Handle a -> CString -> Ptr (Ptr (Sertype b)) -> Ptr () -> Ptr () -> Ptr () -> IO (Handle b)
 foreign import capi "dds/dds.h dds_create_publisher"
   c_dds_create_publisher :: Handle a -> Ptr () -> Ptr () -> IO (Handle ())
 foreign import capi "dds/dds.h dds_create_subscriber"
@@ -182,6 +207,8 @@ foreign import capi "dds/dds.h dds_create_reader"
   c_dds_create_reader :: Handle a -> Handle b -> Ptr () -> Ptr () -> IO (Handle b)
 foreign import capi "dds/dds.h dds_write"
   c_dds_write :: Handle a -> Ptr a -> IO Int32
+foreign import capi "dds/dds.h dds_write"
+  c_dds_write_sampleptr :: Handle a -> SamplePtr a -> IO Int32
 foreign import capi "dds/dds.h dds_take"
   c_dds_take :: Handle a -> Ptr (Ptr a) -> Ptr SampleInfo -> CSize -> Word32 -> IO Int32
 foreign import capi "dds/dds.h dds_return_loan"
