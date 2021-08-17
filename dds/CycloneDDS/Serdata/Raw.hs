@@ -5,7 +5,6 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE CApiFFI #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
---{-# LANGUAGE TypeInType #-}
     
 #include "dds/features.h"
 -- see dds/ddsi/ddsi_serdata.h for the gory details on the C side
@@ -19,6 +18,7 @@ module CycloneDDS.Serdata.Raw
    SerdataContent(..),
    SamplePtr(..),
    SerdataContentPtr(..),
+   SamplesBlob,
    Keyhash(..),
    SerdataOps(..),
    SerdataOpsPtr,
@@ -38,31 +38,29 @@ module CycloneDDS.Serdata.Raw
    newSerdataOpsPtr, freeSerdataOpsPtr,
    SertypeInitFlags(..),
    sertypeTopicKindNoKey, sertypeRequestKeyhash, sertypeFixedSize,
-  c_ddsi_sertype_init_flags,
-  c_ddsi_serdata_init, c_ddsi_serdata_init_untyped,
-  c_ddsi_serdata_ref, c_ddsi_serdata_unref
+   c_ddsi_sertype_init_flags,
+   c_ddsi_serdata_init,
+   c_ddsi_serdata_ref, c_ddsi_serdata_unref
   ) where
 
 import GHC.Generics (Generic)
 import Foreign.C
 import Foreign.Ptr
---import Foreign.ForeignPtr
 import Foreign.StablePtr
 import Foreign.Storable
 import Foreign.Marshal.Alloc
---import Foreign.Marshal.Array
 import Foreign.CStorable
---import Control.Monad (when)
 
---import Data.Kind
 import Data.Word
 import Data.Int
+import Data.IORef
 import Control.Concurrent.MVar
 import Data.Vector.Fixed.Unboxed as VFU
---import Data.Serialize
 import System.Posix.Types.Iovec
 
-data SerdataKind = Empty | Key | Data deriving (Show, Eq, Enum)
+import CycloneDDS.Sample
+
+data SerdataKind = SerdataKindEmpty | SerdataKindKey | SerdataKindData deriving (Show, Eq, Enum)
 
 newtype SerdataKindInt = SerdataKindInt { unSerdataKindInt :: CInt } deriving (Storable)
 marshalSerdataKind :: SerdataKind -> SerdataKindInt
@@ -93,7 +91,7 @@ instance CStorable (SerdataContentPtr a) where
   cPoke = poke
 
 data SerdataContent a = SerdataContent
-  { sdSample :: Maybe a -- use MVar as well? (currently it set only once)
+  { sdSample :: Sample a -- use MVar as well? (currently it set only once)
   , sdCDR :: MVar (Ptr Word8, CSize) -- ByteArray?
   }
 
@@ -193,6 +191,8 @@ instance Storable Fragchain where
 fragchainPayload :: Fragchain -> Ptr Word8
 fragchainPayload fc = rmsgData (fcRMsg fc) `plusPtr` fromIntegral (fcPayloadZoff fc)
 
+type SamplesBlob a = StablePtr (IORef [Sample a])
+
 type SdoEqkey a = Ptr (Serdata a) -> Ptr (Serdata a) -> Bool
 type SdoGetSize a = Ptr (Serdata a) -> IO Word32 -- pure, but lazy serialization means we'd have to do unsafeIO
 type SdoFromSer a = Ptr (Sertype a) -> SerdataKindInt -> Ptr Fragchain -> CSize -> IO (Ptr (Serdata a))
@@ -202,9 +202,9 @@ type SdoFromSample a = Ptr (Sertype a) -> SerdataKindInt -> SamplePtr a -> IO (P
 type SdoToSer a = Ptr (Serdata a) -> CSize -> CSize -> Ptr Word8 -> IO ()
 type SdoToSerRef a = Ptr (Serdata a) -> CSize -> CSize -> Ptr CIovec -> IO (Ptr (Serdata a))
 type SdoToSerUnref a = Ptr (Serdata a) -> Ptr CIovec -> IO ()
-type SdoToSample a = Ptr (Serdata a) -> Ptr a -> Ptr (Ptr Word8) -> Ptr Word8 -> IO Bool
-type SdoToUntyped a = Ptr (Serdata a) -> IO (Ptr (Serdata ()))
-type SdoUntypedToSample a = Ptr (Sertype a) -> Ptr (Serdata ()) -> Ptr a -> Ptr (Ptr Word8) -> Ptr Word8 -> IO Bool
+type SdoToSample a = Ptr (Serdata a) -> Ptr (SamplesBlob a) -> Ptr (Ptr Word8) -> Ptr Word8 -> IO Bool
+type SdoToUntyped a = Ptr (Serdata a) -> IO (Ptr (Serdata a)) -- FIXME: Serdata (XKey a)?
+type SdoUntypedToSample a = Ptr (Sertype a) -> Ptr (Serdata a) -> Ptr (SamplesBlob a) -> Ptr (Ptr Word8) -> Ptr Word8 -> IO Bool -- FIXME: Serdata (XKey a)
 type SdoFree a = Ptr (Serdata a) -> IO ()
 type SdoPrint a = Ptr (Sertype a) -> Ptr (Serdata a) -> Ptr CChar -> CSize -> IO CSize
 type SdoGetKeyhash a = Ptr (Serdata a) -> Ptr Keyhash -> Bool -> IO ()
@@ -308,9 +308,9 @@ freeSerdataOpsPtr (SerdataOpsPtr sdptr) = do
   free sdptr
 
 type StoFree a = Ptr (Sertype a) -> IO ()
-type StoZeroSamples a = Ptr (Sertype a) -> Ptr a -> CSize -> IO ()
-type StoReallocSamples a = Ptr (Ptr a) -> Ptr (Sertype a) -> Ptr a -> CSize -> CSize -> IO ()
-type StoFreeSamples a = Ptr (Sertype a) -> Ptr (Ptr a) -> CSize -> CInt -> IO () -- FIXME dds_free_op_t (final arg)
+type StoReallocSamples a = Ptr (Ptr (SamplesBlob a)) -> Ptr (Sertype a) -> Ptr (SamplesBlob a) -> CSize -> CSize -> IO ()
+type StoZeroSamples a = Ptr (Sertype a) -> Ptr (SamplesBlob a) -> CSize -> IO ()
+type StoFreeSamples a = Ptr (Sertype a) -> Ptr (Ptr (SamplesBlob a)) -> CSize -> CInt -> IO () -- FIXME dds_free_op_t (final arg)
 type StoEqual a = Ptr (Sertype a) -> Ptr (Sertype a) -> Bool
 type StoHash a = Ptr (Sertype a) -> Word32
 type StoTypeidHash = ()
@@ -420,8 +420,6 @@ foreign import capi "dds/ddsi/ddsi_serdata.h ddsi_sertype_init_flags"
   c_ddsi_sertype_init_flags :: Ptr (Sertype a) -> CString -> SertypeOpsPtr a -> SerdataOpsPtr a -> SertypeInitFlags -> IO ()
 foreign import capi "dds/ddsi/ddsi_serdata.h ddsi_serdata_init"
   c_ddsi_serdata_init :: Ptr (Serdata a) -> Ptr (Sertype a) -> SerdataKindInt -> IO ()
-foreign import capi "dds/ddsi/ddsi_serdata.h ddsi_serdata_init" -- FIXME: importing twice for avoid a cast in "ToUntyped"
-  c_ddsi_serdata_init_untyped :: Ptr (Serdata ()) -> Ptr (Sertype a) -> SerdataKindInt -> IO ()
 foreign import capi "dds/ddsi/ddsi_serdata.h ddsi_serdata_ref"
   c_ddsi_serdata_ref :: Ptr (Serdata a) -> IO (Ptr (Serdata a))
 foreign import capi "dds/ddsi/ddsi_serdata.h ddsi_serdata_unref"

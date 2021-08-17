@@ -5,7 +5,6 @@ module CycloneDDS.SampleInfo (
 import Foreign.C
 import Foreign.Ptr
 import Foreign.Storable
---import Control.Applicative ((<$>), (<*>))
 import Data.Word
 import CycloneDDS.BaseTypes
 

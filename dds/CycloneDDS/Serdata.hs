@@ -1,6 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module CycloneDDS.Serdata
   (SerdataKind(..),
@@ -10,10 +11,18 @@ module CycloneDDS.Serdata
    Sertype,
    SertypeOps,
    SamplePtr(..),
-   newSertype
+   newSertype,
+   -- dirty A
+   SamplesBlob,
+   -- dirty B
+   SerdataContent(..),
+   serdataContent,
+   c_ddsi_serdata_unref,
+   TopicType(..)
   ) where
 
 import CycloneDDS.Serdata.Raw
+import CycloneDDS.Sample
 
 import Foreign.C
 import Foreign.Ptr
@@ -21,75 +30,41 @@ import Foreign.StablePtr
 import Foreign.Storable
 import Foreign.Marshal.Alloc
 import Foreign.Marshal.Array
---import Foreign.CStorable
---import Control.Monad (when, void)
 import Control.Concurrent.MVar
 
---import Data.Kind
 import Data.Word
---import Data.Int
---import Data.Vector.Fixed.Unboxed as VFU
 
-import qualified Data.ByteString as B;
-import qualified Data.ByteString.Lazy as BL;
+import qualified Data.ByteString as B
+import qualified Data.ByteString.Lazy as BL
 import Data.ByteString.Builder
-
-import Data.Serialize
-
+import Data.IORef
+import Data.Bits
 import System.Posix.Types.Iovec
 
 import Data.Proxy
 
---type SdoFromSer a = Ptr (Sertype a) -> SerdataKind -> Ptr Fragchain -> CSize -> IO (Ptr (Serdata a))
-
-{- 
-  uint32_t off = 4; /* must skip the CDR header */
-
-  assert (fragchain->min == 0);
-  assert (fragchain->maxp1 >= off); /* CDR header must be in first fragment */
-
-  memcpy (&d->hdr, NN_RMSG_PAYLOADOFF (fragchain->rmsg, NN_RDATA_PAYLOAD_OFF (fragchain)), sizeof (d->hdr));
-  assert (d->hdr.identifier == CDR_LE || d->hdr.identifier == CDR_BE);
-
-  while (fragchain)
-  {
-    assert (fragchain->min <= off);
-    assert (fragchain->maxp1 <= size);
-    if (fragchain->maxp1 > off)
-    {
-      /* only copy if this fragment adds data */
-      const unsigned char *payload = NN_RMSG_PAYLOADOFF (fragchain->rmsg, NN_RDATA_PAYLOAD_OFF (fragchain));
-      serdata_default_append_blob (&d, fragchain->maxp1 - off, payload + off - fragchain->min);
-      off = fragchain->maxp1;
-    }
-    fragchain = fragchain->nextfrag;
-  }
--}
-
 setCDR :: SerdataContent a -> (Ptr Word8, CSize) -> IO (Ptr Word8, CSize)
-setCDR c cdr = do
-  res <- tryPutMVar (sdCDR c) cdr
+setCDR content cdr = do
+  res <- tryPutMVar (sdCDR content) cdr
   case res of
     True  -> pure cdr
-    False -> free (fst cdr) >> readMVar (sdCDR c)
+    False -> free (fst cdr) >> readMVar (sdCDR content)
 
-forceCDR :: (Serialize a, Show a) => SerdataKind -> SerdataContent a -> IO (Ptr Word8, CSize)
-forceCDR Empty _ = undefined
-forceCDR Key   c = do
-  ptr <- callocBytes 4 :: IO (Ptr Word8) -- encoding = 0 (BE), options = 0
-  setCDR c (ptr, 4)
-forceCDR Data  c = do
-  let a = case sdSample c of
-            Just x -> x
-            Nothing -> undefined -- FIXME: I only think it can't happen
+forceCDR :: TopicType a => SerdataKind -> SerdataContent a -> IO (Ptr Word8, CSize)
+forceCDR kind content = do
   --putStrLn $ "makeCDR: serializing " ++ show a
-  let bs = toLazyByteString (word16BE 0 `mappend` word16BE 0 `mappend` (byteString . encode) a)
+  let bs = case (kind, sdSample content) of
+        (SerdataKindEmpty, _)       -> undefined
+        (SerdataKindKey, Key z)     -> encodeKey z
+        (SerdataKindKey, Sample z)  -> encodeKey $ getKey z
+        (SerdataKindData, Key _)    -> undefined
+        (SerdataKindData, Sample z) -> encodeSample z
       l = BL.unpack bs
   --putStrLn $ "makeCDR: blob " ++ show l
   ptr <- newArray l
-  setCDR c (ptr, fromIntegral $ length l)
+  setCDR content (ptr, fromIntegral $ length l)
 
-readCDR :: (Serialize a, Show a) => SerdataKind -> SerdataContent a -> IO (Ptr Word8, CSize)
+readCDR :: TopicType a => SerdataKind -> SerdataContent a -> IO (Ptr Word8, CSize)
 readCDR kind c = do
   cdr <- tryReadMVar (sdCDR c)
   case cdr of
@@ -101,10 +76,10 @@ dropCDR c = tryTakeMVar (sdCDR c) >>= \cdr -> case cdr of
   Nothing -> pure ()
   Just (ptr, _) -> free ptr
 
-serdataFromSerCommon :: (Serialize a, Show a) => Ptr (Sertype a) -> SerdataKindInt -> BL.ByteString -> IO (Ptr (Serdata a))
+serdataFromSerCommon :: TopicType a => Ptr (Sertype a) -> SerdataKindInt -> BL.ByteString -> IO (Ptr (Serdata a))
 serdataFromSerCommon sertypeptr kind bs = do
   --putStrLn "serdataFromSerCommon begin"
-  case decodeLazy bs of
+  case decodeSample bs of
     Left _ {-str-} -> do
       --putStrLn $ "serdataFromSerCommon error: " ++ str
       return nullPtr
@@ -114,7 +89,7 @@ serdataFromSerCommon sertypeptr kind bs = do
       sd <- peek sdptr
       hash <- stSerdataBasehash <$> peek sertypeptr -- keyless for now
       cdr <- newEmptyMVar
-      contentptr <- SerdataContentPtr <$> newStablePtr SerdataContent { sdSample = Just val, sdCDR = cdr }
+      contentptr <- SerdataContentPtr <$> newStablePtr SerdataContent { sdSample = Sample val, sdCDR = cdr }
       poke sdptr $ sd { sdIoxChunk = nullPtr, sdIoxSubscriber = nullPtr, sdHash = hash, sdContent = contentptr }
       --putStrLn "serdataFromSerCommon end"
       return sdptr
@@ -153,15 +128,15 @@ bytestringFromSerIovec niov0 iovptr0 = do -- just like bytestringFromFragchain
       chunk <- B.packCStringLen cslen
       go (accum `mappend` byteString chunk) 0 (niov-1) (iovptr `plusPtr` sizeOf (undefined :: CIovec))
 
-serdataFromSer :: (Serialize a, Show a) => SdoFromSer a
+serdataFromSer :: TopicType a => SdoFromSer a
 serdataFromSer sertypeptr kind fcptr _ =
   bytestringFromFragchain fcptr >>= serdataFromSerCommon sertypeptr kind
 
-serdataFromSerIovec :: (Serialize a, Show a) => SdoFromSerIovec a
+serdataFromSerIovec :: TopicType a => SdoFromSerIovec a
 serdataFromSerIovec sertypeptr kind niov iov _ = do
   bytestringFromSerIovec niov iov >>= serdataFromSerCommon sertypeptr kind
 
-serdataFromSample :: (Serialize a, Show a) => SdoFromSample a
+serdataFromSample :: TopicType a => SdoFromSample a
 serdataFromSample stptr kind samplePtr = do
   --putStrLn "serdataFromSample begin"
   sample <- deRefStablePtr $ unSamplePtr samplePtr
@@ -171,9 +146,9 @@ serdataFromSample stptr kind samplePtr = do
   hash <- stSerdataBasehash <$> peek stptr -- keyless for now
   cdr <- newEmptyMVar
   let content = case unmarshalSerdataKind kind of
-        Empty -> undefined
-        Key -> SerdataContent { sdSample = Nothing, sdCDR = cdr }
-        Data -> SerdataContent { sdSample = Just sample, sdCDR = cdr }
+        SerdataKindEmpty -> undefined
+        SerdataKindKey -> SerdataContent { sdSample = Key (getKey sample), sdCDR = cdr }
+        SerdataKindData -> SerdataContent { sdSample = Sample sample, sdCDR = cdr }
   contentptr <- SerdataContentPtr <$> newStablePtr content
   poke sdptr $ sd { sdHash = hash, sdContent = contentptr }
   --putStrLn "serdataFromSample end"
@@ -182,14 +157,14 @@ serdataFromSample stptr kind samplePtr = do
 serdataContent :: Serdata a -> IO (SerdataContent a)
 serdataContent sd = deRefStablePtr $ unSerdataContentPtr $ sdContent sd
 
-serdataToSer :: (Serialize a, Show a) => SdoToSer a
+serdataToSer :: TopicType a => SdoToSer a
 serdataToSer sdptr offset size bufptr = do
   sd <- peek sdptr
   content <- serdataContent sd
   (cdr, _) <- readCDR (sdKind sd) content
   copyArray bufptr (cdr `plusPtr` fromIntegral offset) (fromIntegral size)
 
-serdataToSerRef :: (Serialize a, Show a) => SdoToSerRef a
+serdataToSerRef :: TopicType a => SdoToSerRef a
 serdataToSerRef sdptr offset size iovecptr = do
   sd <- peek sdptr
   content <- serdataContent sd
@@ -200,7 +175,7 @@ serdataToSerRef sdptr offset size iovecptr = do
 serdataToSerUnref :: SdoToSerUnref a
 serdataToSerUnref sdptr _ = c_ddsi_serdata_unref sdptr
 
-serdataGetSize :: (Serialize a, Show a) => SdoGetSize a
+serdataGetSize :: TopicType a => SdoGetSize a
 serdataGetSize sdptr = do
   --putStrLn $ "serdataGetSize begin"
   sd <- peek sdptr
@@ -209,20 +184,45 @@ serdataGetSize sdptr = do
   --putStrLn $ "serdataGetSize: " ++ show size
   pure $ fromIntegral size
 
-serdataToUntyped :: SdoToUntyped a
+serdataToUntyped :: TopicType a => SdoToUntyped a
 serdataToUntyped sdptr = do
   sd <- peek sdptr
+  content <- serdataContent sd
   sdptr' <- calloc -- FIXME: there are better ways dan malloc/memset/read/modify/write
-  c_ddsi_serdata_init_untyped sdptr' (sdType sd) (marshalSerdataKind Key)
+  c_ddsi_serdata_init sdptr' (sdType sd) (marshalSerdataKind SerdataKindKey)
   sd' <- peek sdptr'
   let hash = sdHash sd
   -- FIXME: yucky hack of clearing sdType seems to not want to go away
   -- (sdType is meaningless if untyped; ddsi_serdata_init doesn't like a null pointer)
   -- keyless, so no need to worry much about SerdataContent
   cdr <- newEmptyMVar
-  contentptr' <- SerdataContentPtr <$> (newStablePtr $ SerdataContent { sdSample = Nothing, sdCDR = cdr }) :: IO (SerdataContentPtr ())
+  let sample' = case sdSample content of
+                  (Key z) -> Key z
+                  (Sample z) -> Key $ getKey z
+      content' = SerdataContent { sdSample = sample', sdCDR = cdr }
+  contentptr' <- SerdataContentPtr <$> (newStablePtr content') -- :: IO (SerdataContentPtr ())
   poke sdptr' $ sd' { sdHash = hash, sdType = nullPtr, sdContent = contentptr' }
   return sdptr'
+
+-- Very hacky: sampleptr is one of the elements in the "ptrs" array filled by
+-- "sertypeReallocSamples", and so a
+--   (Ptr (SamplesBlob a)) = (Ptr (StablePtr (IORef [Sample a])))
+-- and we simply prepend to that list.  Methinks I can get away with this because of the
+-- circumstances under which serdataToSamples is used.
+serdataToSample :: SdoToSample a
+serdataToSample sdptr sampleptr bufp buflim
+  | bufp /= nullPtr = undefined
+  | buflim /= nullPtr = undefined
+  | otherwise = do
+      sd <- peek sdptr
+      content <- serdataContent sd
+      let sample = sdSample content
+      --putStrLn $ "serdataToSample: sampleptr " ++ show sampleptr
+      iorefptr <- peek sampleptr
+      --putStrLn $ "serdataToSample: iorefptr " ++ show iorefptr
+      ioref <- deRefStablePtr iorefptr
+      modifyIORef' ioref (sample :)
+      pure True
 
 serdataFree :: SdoFree a
 serdataFree sdptr = do
@@ -232,13 +232,15 @@ serdataFree sdptr = do
   freeStablePtr $ unSerdataContentPtr $ sdContent sd
   free sdptr
 
-serdataPrint :: Show a => SdoPrint a
+serdataPrint :: (TopicType a, Show a) => SdoPrint a
 serdataPrint _ sdptr buf size
   | size <= 0 = pure 0
   | otherwise = do
       sd <- peek sdptr
       content <- serdataContent sd
-      let text = maybe "(no sample)" show (sdSample content)
+      let text = case sdSample content of
+                   Key z -> show z
+                   Sample z -> show z
           tocopy = take (fromIntegral (size-1)) text
           asbytes = map castCharToCChar tocopy
       pokeArray0 0 buf asbytes
@@ -251,8 +253,62 @@ sertypeFree stptr = do
   freeSerdataOpsPtr $ stSerdataOps st
   free stptr
 
-newSertype :: (Serialize a, Show a) => Proxy a -> String -> IO (Ptr (Sertype a))
-newSertype _ name = do
+-- ptrs is void ** and really expected to be so (but what ptrs[i] actually points to is a don't care for Cyclone)
+-- old may be null, else is the address of a previously allocated blob for `oldcount` elements
+-- on return ptrs[0] must point to the (possibly reallocated) blob
+-- all ptrs[0<i<count] must point to something meaningful for ToSample, FreeSamples
+-- the type of blob is really up to the implementation
+-- it only ever uses ptrs starting from index 0 and incrementing the index
+-- 
+-- blob: (StablePtr (IORef [a]))
+sertypeReallocSamples :: StoReallocSamples a
+sertypeReallocSamples ptrs _st old oldcount count
+  | count == 0       = undefined
+  | count < oldcount = undefined
+  | old == nullPtr   = newblob >>= rebuildPtrs
+  | otherwise        = rebuildPtrs old
+  where
+    newblob = do
+      blob <- malloc
+      --putStrLn $ "sertypeReallocSamples: blob " ++ show blob
+      ioref <- newIORef []
+      iorefptr <- newStablePtr ioref
+      --putStrLn $ "sertypeReallocSamples: iorefptr " ++ show iorefptr
+      poke blob iorefptr
+      pure blob
+    rebuildPtrs blob = pokeArray ptrs (replicate (fromIntegral count) blob)
+
+sertypeZeroSamples :: StoZeroSamples a
+sertypeZeroSamples _st blob _count = do
+  --putStrLn $ "sertypeZeroSamples: blob " ++ show blob
+  iorefptr <- peek blob
+  --putStrLn $ "sertypeZeroSamples: iorefptr " ++ show iorefptr
+  ioref <- deRefStablePtr iorefptr
+  writeIORef ioref []
+
+sertypeFreeSamples :: StoFreeSamples a
+sertypeFreeSamples st ptrs count flags
+  | (flags .&. 4) == 0 = do
+      --putStrLn $ "sertypeFreeSamples (content only): ptrs " ++ show ptrs
+      blob <- peek ptrs
+      --putStrLn $ "sertypeFreeSamples (content only): blob " ++ show blob
+      sertypeZeroSamples st blob count
+  | otherwise = do
+      putStrLn $ "sertypeFreeSamples (content only): ptrs " ++ show ptrs
+      blob <- peek ptrs
+      --putStrLn $ "sertypeFreeSamples (all): blob " ++ show blob
+      iorefptr <- peek blob
+      --putStrLn $ "sertypeFreeSamples (all): blob " ++ show iorefptr
+      freeStablePtr iorefptr
+      free blob
+
+{-
+instance Show (StablePtr a) where
+  show = show . ptrToWordPtr . castStablePtrToPtr
+-}
+
+newSertype :: TopicType a => Proxy a -> String -> IO (Ptr (Sertype a))
+newSertype proxy name = do
   -- Baking new sertype, serdata ops means we will never get different types in
   -- serdataEqual, which is easy and unfortunate at the same time: easy because it means
   -- less to worry about, unfortunate because it means all topics with use unique instance
@@ -261,9 +317,9 @@ newSertype _ name = do
         { stoFree = sertypeFree
         , stoEqual = \_ _ -> True
         , stoHash = \_ -> 0
-        , stoZeroSamples = undefined
-        , stoReallocSamples = undefined
-        , stoFreeSamples = undefined
+        , stoZeroSamples = sertypeZeroSamples
+        , stoReallocSamples = sertypeReallocSamples
+        , stoFreeSamples = sertypeFreeSamples
         }
   sdops <- newSerdataOpsPtr $ SerdataOps
         { sdoFromSer = serdataFromSer
@@ -278,11 +334,11 @@ newSertype _ name = do
         , sdoPrint = serdataPrint
         , sdoFromKeyhash = undefined
         , sdoToSer = serdataToSer
-        , sdoToSample = undefined
+        , sdoToSample = serdataToSample
         , sdoUntypedToSample = undefined
         , sdoGetKeyhash = undefined
         }
   stptr <- calloc
-  let flags = sertypeTopicKindNoKey -- FIXME
+  let flags = if hasKey proxy then 0 else sertypeTopicKindNoKey
   withCString name $ \cname -> c_ddsi_sertype_init_flags stptr cname stops sdops flags
   pure stptr

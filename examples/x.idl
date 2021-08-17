@@ -1,13 +1,45 @@
+@topic
 struct OneULong
 {
   unsigned long seq;
 };
-#pragma keylist OneULong
 
 struct KeyedSeq
 {
   unsigned long seq;
-  unsigned long keyval;
+  @key unsigned long keyval;
   sequence<octet> baggage;
 };
-#pragma keylist KeyedSeq keyval
+
+module fuzzymod {
+  // segfault
+  // Python data:
+  // TypeA(c=[1, 1], i='hello!')
+  // buffer bytes: 00 01 00 00 01 00 01 00 07 00 00 00 68 65 6c 6c 6f 21 00
+  //
+  struct TypeA {
+    @key short c[2];
+    @key string i;
+  };
+
+  // fine, incorrect key?
+  // Python data:
+  // TypeB(c=[1, 1], i='hello!')
+  // buffer bytes: 00 01 00 00 01 00 01 00 07 00 00 00 68 65 6c 6c 6f 21 00
+  //
+  struct TypeB {
+    short c[2];
+    @key string i;
+  };
+
+  // fine, incorrect key?
+  // Python data:
+  // TypeC(c=[1, 1], i='hello!')
+  // buffer bytes: 00 01 00 00 01 01 00 00 07 00 00 00 68 65 6c 6c 6f 21 00
+  //
+  struct TypeC {
+    octet c[2];
+    @key string i;
+  };
+};
+

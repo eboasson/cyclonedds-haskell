@@ -51,3 +51,76 @@ const dds_topic_descriptor_t KeyedSeq_desc =
   KeyedSeq_ops,
   ""
 };
+static const dds_key_descriptor_t fuzzymod_TypeA_keys[2] =
+{
+  { "c", 0 },
+  { "i", 3 }
+};
+
+static const uint32_t fuzzymod_TypeA_ops [] =
+{
+  DDS_OP_ADR | DDS_OP_TYPE_ARR | DDS_OP_SUBTYPE_2BY | DDS_OP_FLAG_SGN | DDS_OP_FLAG_KEY, offsetof (fuzzymod_TypeA, c), 2u,
+  DDS_OP_ADR | DDS_OP_TYPE_STR | DDS_OP_FLAG_KEY, offsetof (fuzzymod_TypeA, i),
+  DDS_OP_RTS
+};
+
+const dds_topic_descriptor_t fuzzymod_TypeA_desc =
+{
+  sizeof (fuzzymod_TypeA),
+  sizeof (char *),
+  DDS_TOPIC_NO_OPTIMIZE,
+  2u,
+  "fuzzymod::TypeA",
+  fuzzymod_TypeA_keys,
+  3,
+  fuzzymod_TypeA_ops,
+  ""
+};
+static const dds_key_descriptor_t fuzzymod_TypeB_keys[1] =
+{
+  { "i", 3 }
+};
+
+static const uint32_t fuzzymod_TypeB_ops [] =
+{
+  DDS_OP_ADR | DDS_OP_TYPE_ARR | DDS_OP_SUBTYPE_2BY | DDS_OP_FLAG_SGN, offsetof (fuzzymod_TypeB, c), 2u,
+  DDS_OP_ADR | DDS_OP_TYPE_STR | DDS_OP_FLAG_KEY, offsetof (fuzzymod_TypeB, i),
+  DDS_OP_RTS
+};
+
+const dds_topic_descriptor_t fuzzymod_TypeB_desc =
+{
+  sizeof (fuzzymod_TypeB),
+  sizeof (char *),
+  DDS_TOPIC_NO_OPTIMIZE,
+  1u,
+  "fuzzymod::TypeB",
+  fuzzymod_TypeB_keys,
+  3,
+  fuzzymod_TypeB_ops,
+  ""
+};
+static const dds_key_descriptor_t fuzzymod_TypeC_keys[1] =
+{
+  { "i", 3 }
+};
+
+static const uint32_t fuzzymod_TypeC_ops [] =
+{
+  DDS_OP_ADR | DDS_OP_TYPE_ARR | DDS_OP_SUBTYPE_1BY, offsetof (fuzzymod_TypeC, c), 2u,
+  DDS_OP_ADR | DDS_OP_TYPE_STR | DDS_OP_FLAG_KEY, offsetof (fuzzymod_TypeC, i),
+  DDS_OP_RTS
+};
+
+const dds_topic_descriptor_t fuzzymod_TypeC_desc =
+{
+  sizeof (fuzzymod_TypeC),
+  sizeof (char *),
+  DDS_TOPIC_NO_OPTIMIZE,
+  1u,
+  "fuzzymod::TypeC",
+  fuzzymod_TypeC_keys,
+  3,
+  fuzzymod_TypeC_ops,
+  ""
+};

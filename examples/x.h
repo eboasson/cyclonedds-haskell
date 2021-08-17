@@ -60,6 +60,48 @@ extern const dds_topic_descriptor_t KeyedSeq_desc;
 #define KeyedSeq_free(d,o) \
 dds_sample_free ((d), &KeyedSeq_desc, (o))
 
+typedef struct fuzzymod_TypeA
+{
+  int16_t c[2];
+  char * i;
+} fuzzymod_TypeA;
+
+extern const dds_topic_descriptor_t fuzzymod_TypeA_desc;
+
+#define fuzzymod_TypeA__alloc() \
+((fuzzymod_TypeA*) dds_alloc (sizeof (fuzzymod_TypeA)));
+
+#define fuzzymod_TypeA_free(d,o) \
+dds_sample_free ((d), &fuzzymod_TypeA_desc, (o))
+
+typedef struct fuzzymod_TypeB
+{
+  int16_t c[2];
+  char * i;
+} fuzzymod_TypeB;
+
+extern const dds_topic_descriptor_t fuzzymod_TypeB_desc;
+
+#define fuzzymod_TypeB__alloc() \
+((fuzzymod_TypeB*) dds_alloc (sizeof (fuzzymod_TypeB)));
+
+#define fuzzymod_TypeB_free(d,o) \
+dds_sample_free ((d), &fuzzymod_TypeB_desc, (o))
+
+typedef struct fuzzymod_TypeC
+{
+  uint8_t c[2];
+  char * i;
+} fuzzymod_TypeC;
+
+extern const dds_topic_descriptor_t fuzzymod_TypeC_desc;
+
+#define fuzzymod_TypeC__alloc() \
+((fuzzymod_TypeC*) dds_alloc (sizeof (fuzzymod_TypeC)));
+
+#define fuzzymod_TypeC_free(d,o) \
+dds_sample_free ((d), &fuzzymod_TypeC_desc, (o))
+
 #ifdef __cplusplus
 }
 #endif

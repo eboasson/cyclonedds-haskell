@@ -1,4 +1,5 @@
 {-# LANGUAGE CApiFFI #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module CycloneDDS (
   DomainId(..),
@@ -9,18 +10,26 @@ module CycloneDDS (
   Writer,
   delete,
   write,
-  write',
   takeN,
   newParticipant,
   newPublisher,
   newSubscriber,
   newTopic,
-  newTopicQQQ,
+  newTopic',
+  write',
+  takeN',
+  takeN'',
   newWriter,
   newReader,
+  Sample(..),
+  TopicType(..),
   InstanceHandle,
   IState(..),
-  SampleInfo(..)) where
+  SampleInfo(..),
+  Qos, QosPolicy(..),
+  DurabilityKind(..), AccessScopeKind(..), OwnershipKind(..), LivelinessKind(..),
+  OrderKind(..), HistoryKind(..), ReliabilityKind(..)
+  ) where
 
 import Foreign.C
 import Foreign.Ptr
@@ -32,12 +41,13 @@ import Control.Monad (when)
 import Data.Int
 import Data.Word
 import Data.Proxy
+import Data.IORef
 import CycloneDDS.TopicDescriptor
 import CycloneDDS.BaseTypes
 import CycloneDDS.SampleInfo
-
-import Data.Serialize
+import CycloneDDS.Qos
 import CycloneDDS.Serdata
+import CycloneDDS.Sample
 
 data DomainId = DefaultDomainId | DomainId Word32 deriving (Eq, Ord, Show, Read)
 
@@ -110,20 +120,25 @@ newParticipant (DomainId did) = do
   dp <- c_dds_create_participant did nullPtr nullPtr
   return $ Participant { participantHandle = dp }
 
-newTopic :: TopicDescriptor a => Participant -> String -> IO (Topic a)
-newTopic dp name = do
+newTopic :: TopicDescriptor a => Participant -> Qos -> String -> IO (Topic a)
+newTopic dp qos name = do
   let dph = entityHandle dp
       td = topicDescriptor Proxy
-  tp <- withCString name $ \cname -> c_dds_create_topic dph td cname nullPtr nullPtr
+  qosobj <- newQos BestEffort qos -- weird DDS spec has default QoS for a topic set to best-effort ...
+  tp <- withCString name $ \cname -> c_dds_create_topic dph td cname qosobj nullPtr
+  freeQos qosobj
   return $ Topic { topicHandle = tp, topicParent = dp }
 
-newTopicQQQ :: (Serialize a, Show a) => Participant -> String -> IO (Topic a)
-newTopicQQQ dp name = do
+newTopic' :: forall a. (TopicType a, Show a) => Participant -> Qos -> String -> IO (Topic a)
+newTopic' dp qos name = do
   let dph = entityHandle dp
-  sertypeptr <- newSertype Proxy "OneULong"
+      tn = typeName (Proxy :: Proxy a)
+  sertypeptr <- newSertype Proxy tn
   sertypeptrptr <- malloc
   poke sertypeptrptr sertypeptr
-  tp <- withCString name $ \cname -> c_dds_create_topic_sertype dph cname sertypeptrptr nullPtr nullPtr nullPtr
+  qosobj <- newQos BestEffort qos -- weird DDS spec has default QoS for a topic set to best-effort ...
+  tp <- withCString name $ \cname -> c_dds_create_topic_sertype dph cname sertypeptrptr qosobj nullPtr nullPtr
+  freeQos qosobj
   free sertypeptrptr -- how do I keep the sertype alive? StablePtr? Store it in the topic? That's probably better
   return $ Topic { topicHandle = tp, topicParent = dp }
 
@@ -169,7 +184,7 @@ write wr v = alloca $ \ptr -> do
   freeAllocatedMemory ptr
   pure ret
 
-write' :: Serialize a => Writer a -> a -> IO Int32
+write' :: TopicType a => Writer a -> a -> IO Int32
 write' wr v = do
   stablev <- SamplePtr <$> newStablePtr v
   ret <- c_dds_write_sampleptr (writerHandle wr) stablev
@@ -191,12 +206,46 @@ takeN maxn rd
           _ <- c_dds_return_loan (readerHandle rd) vsxptr n
           pure $ zip si vs -- could do it in one step, peeking arrays in parallel
 
+takeN' :: TopicType a => Int -> Reader a -> IO [(SampleInfo, Maybe a)]
+takeN' maxn rd
+  | maxn <= 0 = pure $ []
+  | otherwise = do
+      allocaArray maxn $ \siptr ->
+        allocaArray maxn $ \vsxptr -> do
+          poke vsxptr nullPtr -- null pointer in first elemnt of data pointers -> C API calls serdataReallocSamples
+          let cptrs = castPtr vsxptr
+          n <- c_dds_take (readerHandle rd) cptrs siptr (fromIntegral maxn) (fromIntegral maxn)
+          when (n < 0) $ fail ("error in takeN/dds_take: " ++ show n)
+          si <- peekArray (fromIntegral n) siptr
+          blobptr <- peek vsxptr
+          blob <- peek blobptr
+          ioref <- deRefStablePtr blob
+          vs <- readIORef ioref
+          _ <- c_dds_return_loan (readerHandle rd) cptrs n
+          pure $ zip si (reverse vs)
+
+takeN'' :: TopicType a => Int -> Reader a -> IO [(SampleInfo, Sample a)]
+takeN'' maxn rd
+  | maxn <= 0 = pure $ []
+  | otherwise = do
+      allocaArray maxn $ \siptr ->
+        allocaArray maxn $ \serdataptrs1 -> do
+          n <- c_dds_takecdr (readerHandle rd) serdataptrs1 (fromIntegral maxn) siptr 127 -- any sample/view/instance state
+          when (n < 0) $ fail ("error in takeN/dds_take: " ++ show n)
+          si <- peekArray (fromIntegral n) siptr
+          serdataptrs <- peekArray (fromIntegral n) serdataptrs1
+          serdatas <- mapM peek serdataptrs
+          vsc <- mapM serdataContent serdatas
+          let vs = map sdSample vsc
+          mapM_ c_ddsi_serdata_unref serdataptrs
+          pure $ zip si vs
+
 foreign import capi "dds/dds.h dds_create_participant"
   c_dds_create_participant :: Word32 -> Ptr () -> Ptr () -> IO (Handle ())
 foreign import capi "dds/dds.h dds_create_topic"
-  c_dds_create_topic :: Handle a -> TopicDescriptorPtr b -> CString -> Ptr () -> Ptr () -> IO (Handle b)
+  c_dds_create_topic :: Handle a -> TopicDescriptorPtr b -> CString -> QosObject -> Ptr () -> IO (Handle b)
 foreign import capi "dds/dds.h dds_create_topic_sertype"
-  c_dds_create_topic_sertype :: Handle a -> CString -> Ptr (Ptr (Sertype b)) -> Ptr () -> Ptr () -> Ptr () -> IO (Handle b)
+  c_dds_create_topic_sertype :: Handle a -> CString -> Ptr (Ptr (Sertype b)) -> QosObject -> Ptr () -> Ptr () -> IO (Handle b)
 foreign import capi "dds/dds.h dds_create_publisher"
   c_dds_create_publisher :: Handle a -> Ptr () -> Ptr () -> IO (Handle ())
 foreign import capi "dds/dds.h dds_create_subscriber"
@@ -211,6 +260,8 @@ foreign import capi "dds/dds.h dds_write"
   c_dds_write_sampleptr :: Handle a -> SamplePtr a -> IO Int32
 foreign import capi "dds/dds.h dds_take"
   c_dds_take :: Handle a -> Ptr (Ptr a) -> Ptr SampleInfo -> CSize -> Word32 -> IO Int32
+foreign import capi "dds/dds.h dds_takecdr"
+  c_dds_takecdr :: Handle a -> Ptr (Ptr (Serdata a)) -> CSize -> Ptr SampleInfo -> Word32 -> IO Int32
 foreign import capi "dds/dds.h dds_return_loan"
   c_dds_return_loan :: Handle a -> Ptr (Ptr a) -> Int32 -> IO Int32
 foreign import capi "dds/dds.h dds_delete"

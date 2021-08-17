@@ -18,7 +18,7 @@ custom-setup
     process >= 1.6
 
 library
-  exposed-modules:     CycloneDDS, CycloneDDS.TopicDescriptor, CycloneDDS.BaseTypes, CycloneDDS.SampleInfo, CycloneDDS.Serdata, CycloneDDS.Serdata.Raw
+  exposed-modules:     CycloneDDS, CycloneDDS.TopicDescriptor, CycloneDDS.BaseTypes, CycloneDDS.SampleInfo, CycloneDDS.Serdata, CycloneDDS.Serdata.Raw, CycloneDDS.Qos, CycloneDDS.Sample
   hs-source-dirs:      dds
   include-dirs:        /Users/erik/C/cdds/CC/install/include
   extra-lib-dirs:      /Users/erik/C/cdds/CC/install/lib
@@ -38,6 +38,17 @@ executable pp
     examples
     /Users/erik/C/cdds/CC/install/include
   hs-source-dirs:      examples
-  build-depends:       base, CycloneDDS-Haskell, cereal >= 0.5.8.1
+  build-depends:       base, CycloneDDS-Haskell, bytestring >= 0.10.12, cereal >= 0.5.8.1
+  ghc-options:         -Wall -dynamic -threaded -rtsopts -with-rtsopts=-N
+  default-language:    Haskell2010
+
+executable idltest
+  main-is:             IDLTest.hs
+  c-sources:           examples/x.c
+  include-dirs:
+    examples
+    /Users/erik/C/cdds/CC/install/include
+  hs-source-dirs:      examples
+  build-depends:       base, CycloneDDS-Haskell, bytestring >= 0.10.12, cereal >= 0.5.8.1
   ghc-options:         -Wall -dynamic -threaded -rtsopts -with-rtsopts=-N
   default-language:    Haskell2010
